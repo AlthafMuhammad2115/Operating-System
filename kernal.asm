@@ -3,8 +3,21 @@
 
 start:
     mov rdi,Idt
-    mov rax, handler0
 
+;  0-32 entry of Idt is fixed , for example 0th entry is for div by 0 exception, 
+; below we initialized Idt 0th entry map to handler0 , So if zero exception trigered , handler0 code works
+    mov rax, handler0
+    mov [rdi],ax
+    shr rax,16
+    mov [rdi+6],ax
+    shr rax,16
+    mov [rdi+8],eax
+
+; 32-255 entry of Idt is user defined interrupt,
+; Below we intiasialzed 32nd entry of Idt as timer , if interrupt signal 'STI' started timer function trigger
+
+    mov rax, Timer
+    add rdi, 32*16
     mov [rdi],ax
     shr rax,16
     mov [rdi+6],ax
@@ -23,12 +36,53 @@ KernalEntry:
     mov byte[0xb8000],'k'
     mov byte[0xb8001],0xa
 
-    xor rbx,rbx
-    div rbx
+; for user defined Interrupt , init program interrupt timer PIT , we control timer were actal clock freq is 1.2MHz , 
+; we changed the freq to 100Hz by giving an intial value of the timer register as 11931 , it will decrease till 0, do it continuesly
+
+InitPIT:
+    mov al,(1<<2)|(3<<4)
+    out 0x43,al
+
+    mov ax,11931
+    out 0x40,al
+    mov al,ah
+    out 0x40,al
+
+; Program interrupt controller is responsible for control Interrupt,  
+
+InitPIC:
+    mov al,0x11
+    out 0x20,al
+    out 0xa0,al
+
+    mov al,32
+    out 0x21,al
+    mov al,40
+    out 0xa1,al
+
+    mov al,4
+    out 0x21,al
+    mov al,2
+    out 0xa1,al
+
+    mov al,1
+    out 0x21,al
+    out 0xa1,al
+
+    mov al,11111110b
+    out 0x21,al
+    mov al,11111111b
+    out 0xa1,al
+
+; started interrupt by sti
+
+    sti
 
 END:
     hlt
     jmp END
+
+
 
 handler0:
     push rax
@@ -69,9 +123,49 @@ handler0:
     pop rax
     iretq
 
+Timer:
+; save and restore reg for context switch 
+    push rax
+    push rbx  
+    push rcx
+    push rdx  	  
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov byte[0xb8020],'T'
+    mov byte[0xb8021],0xe
+    jmp End
+   
+    pop	r15
+    pop	r14
+    pop	r13
+    pop	r12
+    pop	r11
+    pop	r10
+    pop	r9
+    pop	r8
+    pop	rbp
+    pop	rdi
+    pop	rsi  
+    pop	rdx
+    pop	rcx
+    pop	rbx
+    pop	rax
+
+    iretq
+
 Gdt64:
     dq 0
-    dq 0x0020980000000000
+    dq 0x 0020980000000000
 
 Gdt64Len: equ $-Gdt64
 
