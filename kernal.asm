@@ -2,30 +2,39 @@
 [ORG 0x200000]
 
 start:
-    mov rdi,Idt
 
 ;  0-32 entry of Idt is fixed , for example 0th entry is for div by 0 exception, 
 ; below we initialized Idt 0th entry map to handler0 , So if zero exception trigered , handler0 code works
+    mov rdi,Idt
     mov rax, handler0
-    mov [rdi],ax
-    shr rax,16
-    mov [rdi+6],ax
-    shr rax,16
-    mov [rdi+8],eax
+    call SetHandler
 
 ; 32-255 entry of Idt is user defined interrupt,
 ; Below we intiasialzed 32nd entry of Idt as timer , if interrupt signal 'STI' started timer function trigger
 
+    mov rdi, Idt+32*16
     mov rax, Timer
-    add rdi, 32*16
-    mov [rdi],ax
-    shr rax,16
-    mov [rdi+6],ax
-    shr rax,16
-    mov [rdi+8],eax
+    call SetHandler
+
+    mov rdi, Idt+32*16+7*16
+    mov rax, SIRQ
+    call SetHandler
 
     lgdt[Gdt64Ptr]
     lidt[IdtPtr]
+
+SetTSS:
+    mov rax,TSS
+    mov [TSSDesc+2], ax
+    shr rax,16
+    mov [TSSDesc+4], al
+    mov [TSSDesc+7],ah
+    shr rax, 16
+    mov [TSSDesc+8], eax
+
+    mov ax, 0x20
+    ltr ax
+
 
     push 8
     push KernalEntry
@@ -76,13 +85,40 @@ InitPIC:
 
 ; started interrupt by sti
 
-    sti
+    ; sti
+
+
+
+;For UserMode with DPL ==3 , usermode jump
+    push 0x18 | 3
+    push 0x7c00
+    push 0x202
+    push 0x10 | 3
+    push UserEntry
+    iretq
 
 END:
     hlt
     jmp END
 
+SetHandler:
+    mov [rdi],ax
+    shr rax,16
+    mov [rdi+6],ax
+    shr rax,16
+    mov [rdi+8],eax
+    ret
 
+UserEntry:
+    mov ax,cs
+    and al,11b
+    cmp al,3
+    jne UserEnd
+    mov byte[0xb8000],'U'
+    mov byte[0xb8001],0xa
+
+UserEnd:
+    jmp UserEnd
 
 handler0:
     push rax
@@ -163,9 +199,64 @@ Timer:
 
     iretq
 
+SIRQ:
+    push rax
+    push rbx  
+    push rcx
+    push rdx  	  
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov al,11
+    out 0x20,al
+    in al, 0x20
+
+    test al , (1<<7)
+    jz .end
+
+    mov al, 0x20
+    out 0x20, al
+
+.end:   
+    pop	r15
+    pop	r14
+    pop	r13
+    pop	r12
+    pop	r11
+    pop	r10
+    pop	r9
+    pop	r8
+    pop	rbp
+    pop	rdi
+    pop	rsi  
+    pop	rdx
+    pop	rcx
+    pop	rbx
+    pop	rax
+    iretq
+
 Gdt64:
     dq 0
-    dq 0x 0020980000000000
+    dq 0x0020980000000000
+    dq 0x0020F80000000000
+    dq 0x0000F20000000000
+TSSDesc:
+    dw TSSLen-1
+    dw 0
+    db 0
+    db 0x89
+    db 0
+    db 0
+    dq 0
 
 Gdt64Len: equ $-Gdt64
 
@@ -186,3 +277,11 @@ Idt:
 IdtLen: equ $-Idt
 IdtPtr: dw IdtLen-1
         dq Idt
+
+TSS:
+    dd 0
+    dq 0x150000
+    times 88 db 0
+    dd TSSLen
+
+TSSLen: equ $-TSS
